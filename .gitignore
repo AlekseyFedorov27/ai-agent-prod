@@ -1,0 +1,47 @@
+# --- Секреты ---
+.env
+.env.local
+.env.*.local
+
+
+print.py
+project_dump.txt
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Загруженные документы (в Docker они лежат в томе, локально в этих папках) ---
+uploads/
+backend/uploads/
+backend/app/uploads/
+
+# --- Служебное и временное ---
+print.py
+project_dump.txt
+payload.json
+*.sql
+backup_*.sql
+
+# --- Docker ---
+docker-compose.override.yml

@@ -1,0 +1,9 @@
+Второй экземпляр (в этой же папке) запуск:
+
+bash
+docker volume create langraph_agent_pgdata_2
+INSTANCE=_2 \
+POSTGRES_PORT=5434 REDIS_PORT=6381 BACKEND_PORT=8001 \
+LANGFUSE_PORT=3001 CADDY_PORT=8080 \
+PGDATA_VOLUME=langraph_agent_pgdata_2 \
+docker compose -p ai-agent-prod2-2 up -d --build

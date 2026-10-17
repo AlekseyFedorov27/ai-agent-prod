@@ -1,0 +1,34 @@
+# Версии проверены вместе (Python 3.13, тесты и интеграция с PostgreSQL).
+#
+# Важно: связка langchain 0.3 + langgraph 0.6 выбрана намеренно.
+# SDK Langfuse v2 (под него собран сервер langfuse/langfuse:2 в docker-compose)
+# не работает с langchain 1.x: он импортирует langchain.callbacks, которых там нет.
+# При переходе на langchain 1.x (например, ради Deep Agents) нужно либо поднять
+# Langfuse до v3 вместе с сервером, либо сменить трассировку.
+
+# --- Web ---
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+pydantic-settings==2.16.0
+python-multipart==0.0.32
+
+# --- База данных ---
+sqlalchemy[asyncio]==2.0.55
+asyncpg==0.32.0
+pgvector==0.5.1
+psycopg[binary,pool]==3.3.6      # нужен чекпоинтеру LangGraph
+redis==8.1.0
+
+# --- Агент ---
+langgraph==0.6.11
+langgraph-checkpoint-postgres==2.0.25
+langchain==0.3.30                # требуется SDK Langfuse v2
+langchain-core==0.3.86
+langchain-openai==0.3.35
+langchain-text-splitters==0.3.11
+langfuse==2.60.10
+
+# --- RAG ---
+fastembed>=0.7.0,<1
+pypdf==6.21.1
+python-docx==1.2.0

@@ -1,0 +1,24 @@
+{
+    # Локальная разработка без HTTPS
+    auto_https off
+}
+
+:80 {
+    # Проксирование API. flush_interval -1 отключает буферизацию, чтобы SSE шёл потоком.
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            flush_interval -1
+        }
+    }
+
+    # Всё остальное закрыто. Интерфейс Langfuse доступен напрямую на http://localhost:3000
+    handle {
+        respond "Not found" 404
+    }
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+}

@@ -1,0 +1,146 @@
+# docker-compose.yml
+#
+# ── Обычный запуск (как раньше) ─────────────────────────────────────────
+#   docker volume create langraph_agent_pgdata
+#   docker compose up -d --build
+#
+# ── ВТОРОЙ экземпляр рядом с первым (в этой же папке) ───────────────────
+#   docker volume create langraph_agent_pgdata_2
+#   INSTANCE=_2 \
+#   POSTGRES_PORT=5434 REDIS_PORT=6381 BACKEND_PORT=8001 \
+#   LANGFUSE_PORT=3001 CADDY_PORT=8080 \
+#   PGDATA_VOLUME=langraph_agent_pgdata_2 \
+#   docker compose -p ai-agent-prod2-2 up -d --build
+#
+# ── Переменные и значения по умолчанию ──────────────────────────────────
+#   INSTANCE            суффикс ко всем container_name       (пусто)
+#   POSTGRES_PORT       хост-порт PostgreSQL                 (5433)
+#   REDIS_PORT          хост-порт Redis                      (6380)
+#   BACKEND_PORT        хост-порт backend                    (8000)
+#   LANGFUSE_PORT       хост-порт Langfuse и NEXTAUTH_URL    (3000)
+#   CADDY_PORT          хост-порт Caddy                      (80)
+#   PGDATA_VOLUME       имя внешнего тома PostgreSQL         (langraph_agent_pgdata)
+#
+#   -p <project> задаёт имя compose-проекта: от него зависят имена
+#   внутренних (не-external) томов и сетей, поэтому второй экземпляр
+#   обязательно запускайте с другим -p.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agent_postgres${INSTANCE:-}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - agent_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Одноразовый сервис: создаёт базы langgraph_db и langfuse_db, если их ещё нет
+  db-init:
+    image: pgvector/pgvector:pg16
+    container_name: agent_db_init${INSTANCE:-}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for db in langgraph_db langfuse_db; do
+          psql -h postgres -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$db'" | grep -q 1 \
+            || psql -h postgres -U postgres -c "CREATE DATABASE $$db"
+        done
+
+  backend:
+    build: ./backend
+    container_name: agent_backend${INSTANCE:-}
+    env_file: .env
+    volumes:
+      # Код монтируется только для чтения: правки подхватываются после `docker compose restart backend`
+      - ./backend/app:/app/app:ro
+      - uploads_data:/app/uploads
+      - fastembed_cache:/home/appuser/.cache/fastembed
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 90s  # первый запуск скачивает модель эмбеддингов
+
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis${INSTANCE:-}
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: agent_langfuse${INSTANCE:-}
+    ports:
+      - "127.0.0.1:${LANGFUSE_PORT:-3000}:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/langfuse_db
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:?задайте LANGFUSE_NEXTAUTH_SECRET в .env}
+      # Должно совпадать с наружным портом, иначе NextAuth-редиректы уедут на :3000
+      - NEXTAUTH_URL=http://localhost:${LANGFUSE_PORT:-3000}
+      - SALT=${LANGFUSE_SALT:?задайте LANGFUSE_SALT в .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/public/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: agent_caddy${INSTANCE:-}
+    ports:
+      # Только локальный доступ. Для публикации наружу добавьте HTTPS и ограничения на уровне хоста.
+      - "127.0.0.1:${CADDY_PORT:-80}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  # Внешний том с данными PostgreSQL. Имя специально настраивается:
+  # два одновременно работающих postgres НЕ должны смотреть в один том.
+  #   docker volume create langraph_agent_pgdata      # для первого стека
+  #   docker volume create langraph_agent_pgdata_2    # для второго
+  agent_postgres_data:
+    external: true
+    name: ${PGDATA_VOLUME:-langraph_agent_pgdata}
+  uploads_data:
+  fastembed_cache:
+  caddy_data:
+  caddy_config:
